@@ -1,0 +1,17 @@
+template: |
+  # ✅  **{{Term}}**
+
+  > {{Definition}}
+
+  #### 🧮 Examples:
+
+  > <!-- **Programming Example (e.g., Python):** -->
+  ```python
+  {{CodeExample}}
+  ```
+
+  #### Notes:
+  -  {{Note1}}
+  -  {{Note2}}
+
+  * * *
