@@ -1,0 +1,68 @@
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Jupyter runtime and security
+~/.local/share/jupyter/
+~/.ipython/
+~/.jupyter/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+
+# IPython history
+.profile_default/
+.ipython/
+
+# VSCode or editor configs (optional)
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# JupyterLab staging & build folders
+labextension/
+build/
+node_modules/
+yarn.lock
+package-lock.json
+
+# Virtual environments
+venv/
+env/
+envs/
+.venv/
+.micromamba/
+*.egg-info/
+
+# Python environment config
+.Python
+*.env
+*.envrc
+.env/
+*.log
+
+# Jupyter Notebook metadata cache
+.ipynb_checkpoints/
+.ipynb-jupyter/
+.ipynb-merged/
+.ipynb_out/
+.ipynb_temp/
+
+# Temporary notebooks/output
+*.nbconvert.ipynb
+*.nbconvert.html
+*.out.ipynb
+*.bak.ipynb
+
+# Notebook outputs (optional: uncomment if you want clean version control)
+# *.ipynb
+
+# Ignore everything inside the trash folder
+trash/*
+
+# Except the marker file so the folder stays tracked
+!trash/.gitkeep
