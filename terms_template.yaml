@@ -1,11 +1,11 @@
 template: |
-  # ✅  **{{Term}}**
+  # {{index}}. ✅  **{{Term}}**
 
   > {{Definition}}
 
   #### 🧮 Examples:
 
-  > <!-- **Programming Example (e.g., Python):** -->
+  > 
   ```python
   {{CodeExample}}
   ```
