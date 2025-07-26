@@ -3,11 +3,10 @@
 import os
 import shutil
 
-
 # Template and filenames
 TEMPLATE_FILENAME = "0.Template.ipynb"
-FILENAMES = ["1.Overview", "1.a", "2.b", "3.c", "4.d", "5.e"]
-SEARCH_ROOT = os.path.expanduser("~/Workspace/jupyter")  # Change if needed
+FILENAMES = ["0.Overview", "1.a", "2.b", "3.c", "4.d", "5.e"]
+SEARCH_ROOT = os.path.expanduser("~/Workspace/jupyter")  # Adjust if needed
 
 def find_project_dir(start_path, target_file):
     """
@@ -18,10 +17,9 @@ def find_project_dir(start_path, target_file):
             return root
     return None
 
-
 def cptemp(subdir):
     """
-    Copies template file into a new subdirectory with renamed notebook files.
+    Copies the template file into a new subdirectory with renamed notebook files.
     
     Args:
         subdir (str): Subdirectory name to create under the project directory.
@@ -38,12 +36,14 @@ def cptemp(subdir):
 
     os.makedirs(dest_dir, exist_ok=True)
 
+    print("Found template:", source_file)
+    print("Creating dir:", dest_dir)
+
     for name in FILENAMES:
         dest_path = os.path.join(dest_dir, f"{name}.ipynb")
         shutil.copy(source_file, dest_path)
 
     return f"✅ Copied template into: {dest_dir}"
-
 
 # CLI interface
 if __name__ == "__main__":

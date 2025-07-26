@@ -1,8 +1,9 @@
 from IPython.core.magic import register_line_magic
 from IPython import get_ipython
-from cptemp import cptemp
 import yaml
 import os
+from cptemp import cptemp as cptemp_fun  # alias for the imported function
+
 
 def activate():
     ip = get_ipython()
@@ -49,13 +50,14 @@ def activate():
 
         print("💡 Markdown template(s) inserted into next cell — convert to Markdown and fill in.")
 
+
     @register_line_magic
-    def cp_jup_temp(line):
+    def cptemp(line):
         subdir = line.strip()
         if not subdir:
             print("❌ Please provide a subdirectory name")
             return
-        result = cptemp(subdir)
+        result = cptemp_fun(subdir)  # call the imported function cptemp_fun
         print(result)
 
-    print("✅ Magics `%terms` and `%cp_jup_temp` activated.")
+    print("✅ Magics `%terms` and `%cptemp` activated.")
