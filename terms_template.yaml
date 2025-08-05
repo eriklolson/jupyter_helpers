@@ -1,17 +1,18 @@
-template: |
-  ````markdown
-  # {{Term}}
-  > {{Definition}}
+template:
+  header: |
+    # {{Term}}
+    > {{Definition}}
 
-  #### 🧮 Examples:
-  > 
-  ```python
-  {{CodeExample}}
-  ```
+  examples: |
+    #### 🧮 Example:
+    >````python
+    > {{CodeExample}}
+    >````
 
-  #### Notes:
-  -  {{Note1}}
-  -  {{Note2}}
+  notes: |
+    #### Notes:
+    -  {{Note1}}
+    -  {{Note2}}
 
-  * * *
-  ````
+  footer: |
+    * * *
