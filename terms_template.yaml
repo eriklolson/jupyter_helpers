@@ -1,10 +1,9 @@
 template: |
-  # {{index}}. ✅  **{{Term}}**
-
+  ````markdown
+  # {{Term}}
   > {{Definition}}
 
   #### 🧮 Examples:
-
   > 
   ```python
   {{CodeExample}}
@@ -15,3 +14,4 @@ template: |
   -  {{Note2}}
 
   * * *
+  ````
