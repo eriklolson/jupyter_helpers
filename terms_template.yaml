@@ -1,15 +1,15 @@
 template:
-  header: |
+  h1: |
     # {{Term}}
     > {{Definition}}
 
-  examples: |
+  ex: |
     #### 🧮 Example:
     >````python
     > {{CodeExample}}
     >````
 
-  notes: |
+  n: |
     #### Notes:
     > -  {{Note1}}
     > -  {{Note2}}
