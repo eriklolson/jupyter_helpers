@@ -11,8 +11,8 @@ template:
 
   notes: |
     #### Notes:
-    -  {{Note1}}
-    -  {{Note2}}
+    > -  {{Note1}}
+    > -  {{Note2}}
 
   footer: |
     * * *
