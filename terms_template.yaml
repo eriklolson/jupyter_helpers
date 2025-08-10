@@ -1,19 +1,84 @@
-template:
-  header: |
+template_term:
+  h: |
     # {{Term}}
     {{Definition}}
 
-  examples: |
-    #### 🧮 Example:
+  ex: |
+    #### Example:
     >````python
     > {{CodeExample}}
     >````
 
-  notes: |
+  n: |
     #### Notes:
     -  {{Note1}}
     -  {{Note2}}
 
-  footer: |
+  fo: |
     * * *
     * * *
+
+template_math: |
+  # {{Term}}
+  {{Code/ML Definition}}
+  {{Math Definition}}
+  {{Statistics Definition}}
+
+  #### Code Example:
+  >````python
+  > {{Code/ML Example}}
+  >````
+
+  #### Math Example:
+  >$$
+  > {{Math Example}}
+  >$$
+
+  #### Notes:
+  -  {{Note1}}
+  -  {{Note2}}
+
+  * * *
+  * * *
+
+template_func: |
+  # `{{FunctionName}}()`
+  ### from `{{ModulePath}}`
+  {{Description}}
+
+  >````python
+  > {{FunctionName}}(
+  >     {{Param1}}={{Default1}},
+  >     {{Param2}}={{Default2}},
+  >     *,
+  >     {{Param3}}={{Default3}},
+  >     {{Param4}}={{Default4}},
+  >     {{Param5}}={{Default5}}
+  >     {{...}}
+  > )
+  >````
+
+  | **Syntax** | **Definition** |
+  |------------|----------------|
+  | `{{Param1}}={{Default1}}` | {{Definition1}} |
+  | `{{Param2}}={{Default2}}` | {{Definition2}} |
+  | {{...}} | {{...}} |
+
+  #### Attributes *(if applicable)*:
+  - `{{Attribute1}}`: {{Attribute1Description}}
+  - `{{Attribute2}}`: {{Attribute2Description}}
+
+  #### 🧮 Example Usage
+  >````python
+  > {{ExampleCode}}
+  >````
+
+  #### {{MethodName}}({{MethodSignature}})
+  - {{MethodDescription}}
+
+  >````python
+  > {{MethodExampleCode}}
+  >````
+
+  * * *
+  * * *
