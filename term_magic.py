@@ -1,273 +1,350 @@
-# term_magic.py
+# ~/scripts/jupyter_helpers/term_magic.py
 # -*- coding: utf-8 -*-
-from IPython.core.magic import register_line_magic
-from IPython import get_ipython
-import os
-import yaml
+"""
+Jupyter line magics:
+  - %terms [...]: insert templated Markdown term blocks from terms_template.yaml
+      Usage:
+        %terms numpy,array,vector           # default template (see 'template' in YAML)
+        %terms 3                            # insert 3 blank blocks
+        %terms t2 numpy,vector              # use 'template_math' for given terms
+        %terms t3                           # insert one 'template_func' block
+  - %cp_jup_temp <FolderName>: create templated notebook subdir via cptemp.cptemp()
+  - %nb_search <keyword> [base_dir=~/Workspace/jupyter]:
+        Search case-insensitively through all .ipynb files located in any directory
+        whose path contains a segment starting with '_' (e.g., _MLGlossary/...)
+"""
 
-# Optional: keep your existing helper
+from __future__ import annotations
+import json
+import os
+import re
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+
+from IPython.core.magic import register_line_magic
+from IPython.display import Javascript, display
+
+# --- Optional helpers imported from sibling modules (expected in this project) ---
+# cptemp: user-provided
 try:
-    from cptemp import cptemp
+    from cptemp import cptemp  # noqa: F401
 except Exception:
     cptemp = None
 
-TEMPLATE_PATH = os.path.expanduser("~/scripts/jupyter_helpers/terms_template.yaml")
+# nb_search helpers
+def _find_underscore_notebooks(base_dir: str) -> List[Path]:
+    base = Path(base_dir).expanduser().resolve()
+    notebooks: List[Path] = []
+    for path in base.rglob("*.ipynb"):
+        # any path segment beginning with underscore qualifies
+        if any(part.startswith("_") for part in path.parts):
+            notebooks.append(path)
+    return notebooks
 
-# --- Utilities ----------------------------------------------------------------
+def _search_notebooks_ci(keyword: str, base_dir: str) -> Dict[str, List[tuple]]:
+    """
+    Case-insensitive search inside markdown and code cells.
+    Returns: {notebook_path: [(cell_index, line_number, line_text), ...]}
+    """
+    keyword_re = re.compile(re.escape(keyword), re.IGNORECASE)
+    results: Dict[str, List[tuple]] = {}
+    for nb_file in _find_underscore_notebooks(base_dir):
+        try:
+            with open(nb_file, "r", encoding="utf-8") as f:
+                nb_data = json.load(f)
+        except Exception as e:
+            print(f"⚠ Could not read {nb_file}: {e}")
+            continue
 
-def _load_templates():
-    if not os.path.exists(TEMPLATE_PATH):
-        raise FileNotFoundError(f"❌ Template YAML file not found: {TEMPLATE_PATH}")
-    with open(TEMPLATE_PATH, "r") as f:
+        matches: List[tuple] = []
+        for cell_idx, cell in enumerate(nb_data.get("cells", [])):
+            if cell.get("cell_type") not in ("markdown", "code"):
+                continue
+            for line_idx, line in enumerate(cell.get("source", []), start=1):
+                if keyword_re.search(line):
+                    matches.append((cell_idx, line_idx, line.rstrip()))
+        if matches:
+            results[str(nb_file)] = matches
+    return results
+
+# --- YAML template loading / rendering ---
+
+def _load_terms_yaml(yaml_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Load the user's terms_template.yaml. Supports both top-level 'template:' (single)
+    and multiple named templates like 'template', 'template_term', 'template_math', 'template_func'.
+    """
+    import yaml  # lazy import to keep dependency optional elsewhere
+    default_path = Path("~/scripts/jupyter_helpers/terms_template.yaml").expanduser()
+    path = Path(yaml_path).expanduser() if yaml_path else default_path
+    if not path.exists():
+        raise FileNotFoundError(f"terms_template.yaml not found at: {path}")
+    with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-
-    # Expected keys:
-    # - template_term: {h: str, ex: str, n: str, fo: str}
-    # - template_math: str
-    # - template_func: str
-    if "template_term" not in data:
-        raise KeyError("❌ 'template_term' missing in YAML.")
-    if not isinstance(data["template_term"], dict):
-        raise TypeError("❌ 'template_term' must be a mapping with keys h, ex, n, fo.")
-    for k in ("h", "ex", "n", "fo"):
-        if k not in data["template_term"]:
-            raise KeyError(f"❌ 'template_term.{k}' missing in YAML.")
-
-    if "template_math" not in data:
-        raise KeyError("❌ 'template_math' missing in YAML.")
-
-    if "template_func" not in data:
-        raise KeyError("❌ 'template_func' missing in YAML.")
-
     return data
 
-def _set_next_cell(text: str):
-    ip = get_ipython()
-    if not ip:
-        print("❌ Not running inside IPython.")
-        return
-    # Insert as a NEW cell below
-    ip.set_next_input(text, replace=False)
-
-def _clean_term_name(name: str) -> str:
-    return name.strip()
-
-def _render_placeholders(template: str, mapping: dict) -> str:
-    # Very light templating: only replace a few known keys, leave the rest as-is
-    out = template
-    for key, val in mapping.items():
-        out = out.replace(f"{{{{{key}}}}}", val)
-    return out
-
-def _compose_template_term_block(block_keys, templates_term, term_value=""):
+def _select_template_block(data: Dict[str, Any], key_hint: str | None = None) -> str:
     """
-    block_keys: iterable of keys among ('h','ex','n','fo')
-    templates_term: dict with keys 'h','ex','n','fo'
-    term_value: value to inject into {{Term}}
+    Select a template string from YAML.
+    Priority:
+      - key_hint in {'template', 'template_term', 'template_math', 'template_func'}
+      - 'template' if present
+      - else first string value in the YAML
     """
-    pieces = []
-    for k in block_keys:
-        raw = templates_term[k]
-        rendered = _render_placeholders(raw, {
-            "Term": term_value or "{{Term}}"
-        })
-        pieces.append(rendered.rstrip())
-    return "\n\n".join(pieces).rstrip() + "\n"
+    preferred_keys = []
+    if key_hint:
+        preferred_keys.append(key_hint)
+    preferred_keys.append("template")  # common default from user's spec
 
-def _compose_template_math(template_math: str, term_value: str = "") -> str:
-    return _render_placeholders(template_math, {
-        "Term": term_value or "{{Term}}"
-    }).rstrip() + "\n"
+    for k in preferred_keys:
+        if k in data and isinstance(data[k], str):
+            return data[k]
 
-def _compose_template_func(template_func: str, func_name: str = "", module_path: str = "") -> str:
-    # Best effort: fill FunctionName and ModulePath if provided
-    mapping = {
-        "FunctionName": func_name or "{{FunctionName}}",
-        "ModulePath": module_path or "{{ModulePath}}"
-    }
-    return _render_placeholders(template_func, mapping).rstrip() + "\n"
+    # fall back: find any first string template in mapping (e.g., data['template_term']['h'] etc)
+    for v in data.values():
+        if isinstance(v, str):
+            return v
 
-def _parse_terms_arg(line: str):
+    # Some users split templates into sections (h/ex/n/fo). If so, stitch them if key_hint provided.
+    if key_hint and key_hint in data and isinstance(data[key_hint], dict):
+        # Attempt to join sections in a sensible order
+        order = ["h", "ex", "n", "fo"]
+        parts = []
+        for sect in order:
+            block = data[key_hint].get(sect)
+            if isinstance(block, str):
+                parts.append(block)
+        if parts:
+            return "\n".join(parts)
+
+    raise ValueError("No string templates found in terms_template.yaml")
+
+def _render(template: str, mapping: Dict[str, str]) -> str:
     """
-    Returns a dict:
-      {
-        'mode': 't1'|'t2'|'t3',      # t1 = template_term, t2 = template_math, t3 = template_func
-        'blocks': ['h','ex','n','fo'] or subset for t1,
-        'items': ['term1','term2', ...]   # or [] if using count
-        'count': int or None,
-        'module_hint': str or ""         # for t3 optional second token like numpy.linalg
-      }
-    Accepted forms:
-      %terms                             -> full template_term (h+ex+n+fo) with one blank block
-      %terms h,ex                        -> only header+example blocks (blank term)
-      %terms Vector                      -> full template_term for "Vector"
-      %terms h Vector,Matrix             -> only header block for both terms
-      %terms 3                           -> insert 3 blank full template_term entries
-      %terms t2                          -> template_math blank
-      %terms t2 Probability,Variance     -> template_math for two terms
-      %terms t3                          -> template_func blank
-      %terms t3 mean numpy               -> template_func with FunctionName=mean, ModulePath=numpy
-      %terms t3 polyfit numpy.polynomial -> template_func with FunctionName=polyfit, ModulePath=numpy.polynomial
+    Very light mustache-style replacement: {{Key}} -> value (or unchanged if missing).
     """
-    s = (line or "").strip()
-    if not s:
-        return {"mode": "t1", "blocks": ["h","ex","n","fo"], "items": [], "count": 1, "module_hint": ""}
+    def repl(match):
+        key = match.group(1).strip()
+        return str(mapping.get(key, f"{{{{{key}}}}}"))
+    return re.sub(r"\{\{\s*([^\}]+)\s*\}\}", repl, template)
 
-    # Mode shortcuts
-    tokens = s.split()
-    first = tokens[0].lower()
+def _insert_markdown_cell(md_text: str) -> None:
+    """
+    Insert a new Markdown cell BELOW the current cell and set its content to md_text.
+    """
+    # Escape JS string properly
+    js = f"""
+    var md = {json.dumps(md_text)};
+    var cell = Jupyter.notebook.insert_cell_below('markdown');
+    cell.set_text(md);
+    cell.render();
+    """
+    display(Javascript(js))
 
-    # Detect t2/t3 modes
-    if first in ("t2", "t3"):
-        mode = first
-        rest = s[len(first):].strip()
-        if not rest:
-            return {"mode": mode, "blocks": [], "items": [], "count": 1, "module_hint": ""}
+# --- Public activation function + magics ---
 
-        # For t3, allow: "t3 func [module.path]"
-        if mode == "t3":
-            parts = [p for p in rest.split() if p.strip()]
-            if len(parts) == 1:
-                return {"mode": "t3", "blocks": [], "items": [parts[0]], "count": None, "module_hint": ""}
-            elif len(parts) >= 2:
-                return {"mode": "t3", "blocks": [], "items": [parts[0]], "count": None, "module_hint": " ".join(parts[1:])}
+def activate(terms_yaml_path: Optional[str] = None,
+             default_base_dir: str = "~/Workspace/jupyter") -> None:
+    """
+    Register line magics into the current IPython session.
+    - terms_yaml_path: custom path to terms_template.yaml (optional)
+    - default_base_dir: base path for %nb_search (optional)
+    """
+
+    # Store defaults on function object to read inside closures
+    activate._terms_yaml_path = terms_yaml_path
+    activate._default_base_dir = default_base_dir
+
+    @register_line_magic
+    def terms(line: str = ""):
+        """
+        Insert term templates into a new Markdown cell.
+
+        Usage:
+          %terms numpy,array,vector          # uses 'template' (or first available)
+          %terms 3                           # insert 3 blank/default blocks
+          %terms t2 numpy,vector             # uses 'template_math'
+          %terms t3                          # uses 'template_func' once
+          %terms t1 5                        # uses 'template' 5 times
+
+        Template key aliases:
+          t1 -> 'template' or 'template_term' (if present)
+          t2 -> 'template_math'
+          t3 -> 'template_func'
+        """
+        line = (line or "").strip()
+
+        # Parse possible leading template selector (t1/t2/t3) and the rest
+        tmpl_key_map = {
+            "t1": None,               # prefer 'template' (falls back automatically)
+            "t2": "template_math",
+            "t3": "template_func",
+        }
+
+        parts = line.split(maxsplit=1)
+        key_hint = None
+        rest = ""
+        if parts and parts[0].lower() in tmpl_key_map:
+            key_hint = tmpl_key_map[parts[0].lower()]
+            rest = parts[1].strip() if len(parts) > 1 else ""
         else:
-            # t2 with comma list of terms
-            items = [t for t in (p.strip() for p in rest.split(",")) if t]
-            if len(items) == 1 and items[0].isdigit():
-                return {"mode": "t2", "blocks": [], "items": [], "count": int(items[0]), "module_hint": ""}
-            return {"mode": "t2", "blocks": [], "items": items, "count": None, "module_hint": ""}
+            rest = line
 
-    # Otherwise template_term (t1)
-    # Check if it starts with block selectors
-    if first in ("h", "ex", "n", "fo"):
-        # allow comma separated block list in the first token OR across multiple tokens
-        # e.g., "h,ex term1,term2"
-        block_token = tokens[0]
-        block_list = [b.strip().lower() for b in block_token.split(",") if b.strip()]
-        rest = s[len(block_token):].strip()
-        # remaining are item terms (comma-separated) OR a single integer count
-        if not rest:
-            return {"mode": "t1", "blocks": block_list, "items": [], "count": 1, "module_hint": ""}
-        # If numeric, it's a count
-        if rest.isdigit():
-            return {"mode": "t1", "blocks": block_list, "items": [], "count": int(rest), "module_hint": ""}
-        items = [t for t in (p.strip() for p in rest.split(",")) if t]
-        return {"mode": "t1", "blocks": block_list, "items": items, "count": None, "module_hint": ""}
+        # Load YAML and resolve the template string
+        data = _load_terms_yaml(activate._terms_yaml_path)
+        # If user prefers template_term as default, allow aliasing:
+        if key_hint is None and "template" not in data and "template_term" in data:
+            key_hint = "template_term"
+        template_str = _select_template_block(data, key_hint)
 
-    # If single integer → N blank full entries
-    if s.isdigit():
-        return {"mode": "t1", "blocks": ["h","ex","n","fo"], "items": [], "count": int(s), "module_hint": ""}
+        # Decide whether 'rest' is a number (count) or a comma list of terms
+        count = 0
+        terms_list: List[str] = []
+        numeric = rest.isdigit()
 
-    # Else, treat as comma-separated terms with full blocks
-    items = [t for t in (p.strip() for p in s.split(",")) if t]
-    return {"mode": "t1", "blocks": ["h","ex","n","fo"], "items": items, "count": None, "module_hint": ""}
+        if numeric:
+            count = int(rest)
+            if count <= 0:
+                print("Nothing to insert (count <= 0).")
+                return
+        else:
+            # comma-separated terms; allow empty to insert one blank
+            terms_list = [t.strip() for t in rest.split(",") if t.strip()] if rest else []
+            if not terms_list:
+                count = 1  # one blank block
 
-def activate():
-    ip = get_ipython()
-    if not ip:
-        print("❌ Not running inside IPython.")
-        return
+        # Build final markdown (concatenate if multiple)
+        blocks: List[str] = []
+        if terms_list:
+            for term in terms_list:
+                mapping = {
+                    "Term": term,
+                    "FunctionName": term,
+                    "ModulePath": "{{ModulePath}}",
+                    "Description": "{{Description}}",
+                    "CodeExample": "{{CodeExample}}",
+                    "Code/ML Example": "{{Code/ML Example}}",
+                    "Code/ML Definition": "{{Code/ML Definition}}",
+                    "Math Definition": "{{Math Definition}}",
+                    "Statistics Definition": "{{Statistics Definition}}",
+                    "Note1": "{{Note1}}",
+                    "Note2": "{{Note2}}",
+                    "MethodName": "{{MethodName}}",
+                    "MethodSignature": "{{MethodSignature}}",
+                    "MethodDescription": "{{MethodDescription}}",
+                    "ExampleCode": "{{ExampleCode}}",
+                    "Default1": "{{Default1}}",
+                    "Default2": "{{Default2}}",
+                    "Param1": "{{Param1}}",
+                    "Param2": "{{Param2}}",
+                    "Param3": "{{Param3}}",
+                    "Param4": "{{Param4}}",
+                    "Param5": "{{Param5}}",
+                    "Definition1": "{{Definition1}}",
+                    "Definition2": "{{Definition2}}",
+                }
+                blocks.append(_render(template_str, mapping).rstrip())
+        else:
+            # insert 'count' blank/default blocks
+            for _ in range(count):
+                blocks.append(_render(template_str, {
+                    "Term": "{{Term}}",
+                    "FunctionName": "{{FunctionName}}",
+                    "ModulePath": "{{ModulePath}}",
+                    "Description": "{{Description}}",
+                    "CodeExample": "{{CodeExample}}",
+                    "Code/ML Example": "{{Code/ML Example}}",
+                    "Code/ML Definition": "{{Code/ML Definition}}",
+                    "Math Definition": "{{Math Definition}}",
+                    "Statistics Definition": "{{Statistics Definition}}",
+                    "Note1": "{{Note1}}",
+                    "Note2": "{{Note2}}",
+                    "MethodName": "{{MethodName}}",
+                    "MethodSignature": "{{MethodSignature}}",
+                    "MethodDescription": "{{MethodDescription}}",
+                    "ExampleCode": "{{ExampleCode}}",
+                    "Default1": "{{Default1}}",
+                    "Default2": "{{Default2}}",
+                    "Param1": "{{Param1}}",
+                    "Param2": "{{Param2}}",
+                    "Param3": "{{Param3}}",
+                    "Param4": "{{Param4}}",
+                    "Param5": "{{Param5}}",
+                    "Definition1": "{{Definition1}}",
+                    "Definition2": "{{Definition2}}",
+                }).rstrip())
+
+        final_md = "\n\n".join(blocks)
+        # Ensure outer raw markdown block if user prefers to paste as raw md
+        # (Not enforcing global wrapper here; templates themselves usually contain code-fences.)
+        _insert_markdown_cell(final_md)
+        print(f"✅ Inserted {len(blocks)} template block(s).")
 
     @register_line_magic
-    def cp_jup_temp(line):
-        """Create templated notebooks via cptemp."""
+    def cp_jup_temp(line: str = ""):
+        """
+        Create a Jupyter subdirectory with templated notebooks.
+        Usage:
+          %cp_jup_temp 01.Intro
+        """
+        target = (line or "").strip()
+        if not target:
+            print("❌ Please provide a folder name. Example: %cp_jup_temp 01.Intro")
+            return
         if cptemp is None:
-            print("❌ cptemp not available. Ensure it is importable.")
-            return
-        folder = (line or "").strip()
-        if not folder:
-            print("❌ Usage: %cp_jup_temp <FolderName>")
+            print("❌ cptemp module not found. Ensure it is importable from this kernel.")
             return
         try:
-            cptemp(folder)
-            print(f"✅ Created template notebooks in '{folder}'.")
+            cptemp(target)
+            print(f"✅ Created templated notebooks in: {target}")
         except Exception as e:
-            print(f"❌ cptemp error: {e}")
+            print(f"⚠ Error creating notebooks: {e}")
 
     @register_line_magic
-    def terms(line):
+    def nb_search(line: str = ""):
         """
-        Insert study-note templates into the next cell.
+        Search all .ipynb files inside directories whose path contains any segment
+        starting with '_' (e.g., _MLGlossary/) for a case-insensitive keyword.
 
-        Usage (template_term):
-          %terms                         # full (h+ex+n+fo), 1 blank
-          %terms 3                       # full, 3 blanks
-          %terms Vector,Matrix           # full for each term
-          %terms h                       # header only, 1 blank
-          %terms h 2                     # header only, 2 blanks
-          %terms h Vector,Matrix         # header only for each term
-          %terms h,ex Vector             # header+example for 'Vector'
-
-        Usage (template_math):
-          %terms t2                      # 1 blank
-          %terms t2 Probability,Variance # one per term
-          %terms t2 2                    # 2 blanks
-
-        Usage (template_func):
-          %terms t3                      # 1 blank
-          %terms t3 mean                 # FunctionName=mean
-          %terms t3 polyfit numpy        # FunctionName=polyfit, ModulePath=numpy
-          %terms t3 dot numpy.linalg     # FunctionName=dot, ModulePath=numpy.linalg
+        Usage:
+          %nb_search keyword
+          %nb_search "predict_proba"
+          %nb_search keyword base_dir=~/Workspace/jupyter
         """
-        try:
-            data = _load_templates()
-        except Exception as e:
-            print(e)
+        line = (line or "").strip()
+        if not line:
+            print("❌ Usage: %nb_search <keyword> [base_dir=~/Workspace/jupyter]")
             return
 
-        args = _parse_terms_arg(line)
+        # Parse optional base_dir=...
+        base_dir = getattr(activate, "_default_base_dir", "~/Workspace/jupyter")
+        m = re.search(r'\bbase_dir\s*=\s*([^\s]+)', line)
+        if m:
+            base_dir = m.group(1)
 
-        mode = args["mode"]          # 't1' | 't2' | 't3'
-        blocks = args["blocks"]      # for t1 only
-        items = args["items"]        # list of terms or function names
-        count = args["count"]        # int or None
-        module_hint = args["module_hint"]
+        # keyword is everything before base_dir=...
+        keyword = line[: m.start()].strip() if m else line
+        if not keyword:
+            print("❌ Please provide a keyword to search.")
+            return
 
-        out_chunks = []
+        results = _search_notebooks_ci(keyword, base_dir)
 
-        if mode == "t1":
-            # template_term with block selection
-            T = data["template_term"]
-            block_keys = blocks or ["h","ex","n","fo"]
+        if not results:
+            print(f"❌ No matches found for '{keyword}' under {Path(base_dir).expanduser().resolve()}")
+            return
 
-            if count is not None and count > 0:
-                for _ in range(count):
-                    out_chunks.append(_compose_template_term_block(block_keys, T, term_value=""))
-            elif items:
-                for term in items:
-                    out_chunks.append(_compose_template_term_block(block_keys, T, term_value=_clean_term_name(term)))
-            else:
-                out_chunks.append(_compose_template_term_block(block_keys, T, term_value=""))
+        # Pretty print results; also emit naive 'clickable' paths for some frontends
+        for nb, matches in results.items():
+            print(f"\n📓 {nb}")
+            for cell_idx, line_idx, text in matches:
+                # Trim overly long lines for console readability
+                snippet = (text[:160] + "…") if len(text) > 160 else text
+                print(f"  • Cell {cell_idx}, Line {line_idx}: {snippet}")
 
-        elif mode == "t2":
-            # template_math
-            T = data["template_math"]
-            if count is not None and count > 0:
-                for _ in range(count):
-                    out_chunks.append(_compose_template_math(T, term_value=""))
-            elif items:
-                for term in items:
-                    out_chunks.append(_compose_template_math(T, term_value=_clean_term_name(term)))
-            else:
-                out_chunks.append(_compose_template_math(T, term_value=""))
+        print(f"\n✅ {sum(len(v) for v in results.values())} match(es) across {len(results)} notebook(s).")
 
-        elif mode == "t3":
-            # template_func
-            T = data["template_func"]
-            if items:
-                func = _clean_term_name(items[0])
-                mp   = module_hint.strip()
-                out_chunks.append(_compose_template_func(T, func_name=func, module_path=mp))
-            else:
-                # count is supported but uncommon; default to 1
-                n = count if (count and count > 0) else 1
-                for _ in range(n):
-                    out_chunks.append(_compose_template_func(T, func_name="", module_path=""))
-
-        final_text = "\n".join(chunk.rstrip() for chunk in out_chunks).rstrip() + "\n"
-        _set_next_cell(final_text)
-        print("✅ Inserted template into the next cell.")
-
-# If imported, auto-activate only when explicitly called by user:
-# from term_magic import activate; activate()
+# When imported in a Python session, users will call:
+#   from term_magic import activate
+#   activate()
+# which registers the magics.
