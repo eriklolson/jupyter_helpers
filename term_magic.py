@@ -311,6 +311,8 @@ def activate(terms_yaml_path: Optional[str] = None,
           %nb_search "predict_proba"
           %nb_search keyword base_dir=~/Workspace/jupyter
         """
+        from IPython.display import Markdown, display
+
         line = (line or "").strip()
         if not line:
             print("❌ Usage: %nb_search <keyword> [base_dir=~/Workspace/jupyter]")
@@ -329,21 +331,35 @@ def activate(terms_yaml_path: Optional[str] = None,
             return
 
         results = _search_notebooks_ci(keyword, base_dir)
-
         if not results:
             print(f"❌ No matches found for '{keyword}' under {Path(base_dir).expanduser().resolve()}")
             return
 
-        # Pretty print results; also emit naive 'clickable' paths for some frontends
+        # Markdown span for bold red
+        def highlight_md(match):
+            return f"<span style='color:red;font-weight:bold;'>{match.group(0)}</span>"
+
+        output_lines = []
         for nb, matches in results.items():
-            print(f"\n📓 {nb}")
+            nb_dir = Path(nb).parent.name
+            nb_name = Path(nb).name
+            # Show directory before filename
+            output_lines.append(f"### 📓 {nb_dir}/{nb_name}")
             for cell_idx, line_idx, text in matches:
-                # Trim overly long lines for console readability
-                snippet = (text[:160] + "…") if len(text) > 160 else text
-                print(f"  • Cell {cell_idx}, Line {line_idx}: {snippet}")
+                snippet = text.strip()
+                # Highlight keyword
+                snippet = re.sub(
+                    re.escape(keyword),
+                    highlight_md,
+                    snippet,
+                    flags=re.IGNORECASE
+                )
+                if len(snippet) > 160:
+                    snippet = snippet[:160] + "…"
+                output_lines.append(f"- **Cell {cell_idx}, Line {line_idx}:** {snippet}")
 
+        display(Markdown("\n".join(output_lines)))
         print(f"\n✅ {sum(len(v) for v in results.values())} match(es) across {len(results)} notebook(s).")
-
 # When imported in a Python session, users will call:
 #   from term_magic import activate
 #   activate()
