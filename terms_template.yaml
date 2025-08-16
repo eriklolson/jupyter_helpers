@@ -10,9 +10,9 @@ template_term:
     >````
 
   n: |
-    #### Notes:
-    -  {{Note1}}
-    -  {{Note2}}
+    > #### Notes:
+    > -  {{Note1}}
+    > -  {{Note2}}
 
   fo: |
     * * *

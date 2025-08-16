@@ -10,6 +10,12 @@ Jupyter line magics:
         %terms t3                           # insert one 'template_func' block
         %terms t1 5                         # use default template 5 times
 
+      NEW (section-only from template_term):
+        %terms h Term1,Term2                # insert only header block(s) for the terms
+        %terms ex pandas                    # insert only example block
+        %terms n 3                          # insert notes block 3 times (blank)
+        %terms fo                           # insert footer once
+
   - %cp_jup_temp <FolderName>: create templated notebook subdir via cptemp.cptemp()
 
   - %nb_search <keyword> [base_dir=~/Workspace/jupyter]:
@@ -20,7 +26,6 @@ Jupyter line magics:
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -30,7 +35,6 @@ from IPython.display import display, Markdown
 from IPython import get_ipython
 
 # --- Optional helpers imported from sibling modules (expected in this project) ---
-# cptemp: user-provided (safe if missing)
 try:
     from cptemp import cptemp  # noqa: F401
 except Exception:
@@ -44,7 +48,6 @@ def _find_underscore_notebooks(base_dir: str) -> List[Path]:
     base = Path(base_dir).expanduser().resolve()
     notebooks: List[Path] = []
     for path in base.rglob("*.ipynb"):
-        # any path segment beginning with underscore qualifies
         if any(part.startswith("_") for part in path.parts):
             notebooks.append(path)
     return notebooks
@@ -109,36 +112,26 @@ def _select_template_block(data: Dict[str, Any], key_hint: str | None = None) ->
     preferred_keys: List[str] = []
     if key_hint:
         preferred_keys.append(key_hint)
-    preferred_keys.append("template")  # common default from user's spec
+    preferred_keys.append("template")
 
-    # direct string matches first
     for k in preferred_keys:
         if k in data and isinstance(data[k], str):
             return data[k]
 
-    # stitch if key_hint points to a dict like template_term: {h/ex/n/fo}
     if key_hint and key_hint in data and isinstance(data[key_hint], dict):
         order = ["h", "ex", "n", "fo"]
-        parts = []
-        for sect in order:
-            block = data[key_hint].get(sect)
-            if isinstance(block, str):
-                parts.append(block)
+        parts = [data[key_hint].get(sect) for sect in order]
+        parts = [p for p in parts if isinstance(p, str)]
         if parts:
             return "\n".join(parts)
 
-    # if no hint (or missing), try template_term stitching automatically
     if "template_term" in data and isinstance(data["template_term"], dict):
         order = ["h", "ex", "n", "fo"]
-        parts = []
-        for sect in order:
-            block = data["template_term"].get(sect)
-            if isinstance(block, str):
-                parts.append(block)
+        parts = [data["template_term"].get(sect) for sect in order]
+        parts = [p for p in parts if isinstance(p, str)]
         if parts:
             return "\n".join(parts)
 
-    # fall back: first string in mapping
     for v in data.values():
         if isinstance(v, str):
             return v
@@ -146,10 +139,21 @@ def _select_template_block(data: Dict[str, Any], key_hint: str | None = None) ->
     raise ValueError("No string templates found in terms_template.yaml")
 
 
+def _select_template_section(data: Dict[str, Any], section: str) -> str:
+    """
+    Return a single section ('h'|'ex'|'n'|'fo') from template_term.
+    """
+    tt = data.get("template_term")
+    if not isinstance(tt, dict):
+        raise ValueError("template_term is not a sectioned mapping in terms_template.yaml")
+    block = tt.get(section)
+    if not isinstance(block, str):
+        raise ValueError(f"template_term['{section}'] not found or not a string")
+    return block
+
+
 def _render(template: str, mapping: Dict[str, str]) -> str:
-    """
-    Very light mustache-style replacement: {{Key}} -> value (or unchanged if missing).
-    """
+    """Light mustache-style replacement: {{Key}} -> value (unchanged if missing)."""
     def repl(match):
         key = match.group(1).strip()
         return str(mapping.get(key, f"{{{{{key}}}}}"))
@@ -163,16 +167,12 @@ def _insert_markdown_cell(md_text: str) -> None:
     """
     Insert a new Markdown cell BELOW the current cell in a JupyterLab/Notebook-safe way,
     without relying on the front-end `Jupyter` JS object.
-
-    We prefill the next cell with the `%%markdown` cell magic so it's a real markdown cell
-    once you execute it.
     """
     ip = get_ipython()
     if not ip or not hasattr(ip, "set_next_input"):
         print("⚠ Could not access IPython. Are you running inside Jupyter?")
         return
-
-    md_magic_block = "%%markdown\n" + md_text
+    md_magic_block = md_text
     ip.set_next_input(md_magic_block, replace=False)
 
 
@@ -195,46 +195,63 @@ def activate(terms_yaml_path: Optional[str] = None,
         Insert term templates into a new Markdown cell.
 
         Usage:
-          %terms numpy,array,vector          # uses 'template' or 'template_term'
+          %terms numpy,array,vector          # uses 'template' or stitched 'template_term'
           %terms 3                           # insert 3 blank/default blocks
           %terms t2 numpy,vector             # uses 'template_math'
           %terms t3                          # uses 'template_func' once
           %terms t1 5                        # uses default template 5 times
 
-        Template key aliases:
-          t1 -> 'template' (falls back to stitching 'template_term' if needed)
-          t2 -> 'template_math'
-          t3 -> 'template_func'
+        Section-only (from template_term):
+          %terms h Term1,Term2
+          %terms ex pandas
+          %terms n 3
+          %terms fo
         """
         line = (line or "").strip()
 
+        # Whole-template aliases
         tmpl_key_map = {
-            "t1": None,               # prefer 'template'; if absent, stitch 'template_term'
+            "t1": None,               # prefer 'template'; else stitch 'template_term'
             "t2": "template_math",
             "t3": "template_func",
         }
 
+        # Section-only selectors
+        section_keys = {"h", "ex", "n", "fo"}
+
         parts = line.split(maxsplit=1)
         key_hint = None
         rest = ""
-        if parts and parts[0].lower() in tmpl_key_map:
-            key_hint = tmpl_key_map[parts[0].lower()]
-            rest = parts[1].strip() if len(parts) > 1 else ""
+        section_hint = None
+
+        if parts:
+            head = parts[0].lower()
+            if head in section_keys:
+                section_hint = head
+                rest = parts[1].strip() if len(parts) > 1 else ""
+            elif head in tmpl_key_map:
+                key_hint = tmpl_key_map[head]
+                rest = parts[1].strip() if len(parts) > 1 else ""
+            else:
+                rest = line
         else:
-            rest = line
+            rest = ""
 
-        # Load YAML and resolve the template string
+        # Load YAML
         data = _load_terms_yaml(activate._terms_yaml_path)
-        # If user prefers template_term as default, allow aliasing when 'template' is missing
-        if key_hint is None and "template" not in data and "template_term" in data:
-            key_hint = "template_term"
-        template_str = _select_template_block(data, key_hint)
 
-        # Decide whether 'rest' is a number (count) or a comma list of terms
+        # Resolve template string
+        if section_hint:
+            template_str = _select_template_section(data, section_hint)
+        else:
+            if key_hint is None and "template" not in data and "template_term" in data:
+                key_hint = "template_term"
+            template_str = _select_template_block(data, key_hint)
+
+        # Parse terms/count
         count = 0
         terms_list: List[str] = []
         numeric = rest.isdigit()
-
         if numeric:
             count = int(rest)
             if count <= 0:
@@ -243,9 +260,8 @@ def activate(terms_yaml_path: Optional[str] = None,
         else:
             terms_list = [t.strip() for t in rest.split(",") if t.strip()] if rest else []
             if not terms_list:
-                count = 1  # one blank block
+                count = 1
 
-        # Build final markdown (concatenate if multiple)
         def _blank_mapping() -> Dict[str, str]:
             return {
                 "Term": "{{Term}}",
@@ -278,10 +294,7 @@ def activate(terms_yaml_path: Optional[str] = None,
         if terms_list:
             for term in terms_list:
                 mapping = _blank_mapping()
-                mapping.update({
-                    "Term": term,
-                    "FunctionName": term,
-                })
+                mapping.update({"Term": term, "FunctionName": term})
                 blocks.append(_render(template_str, mapping).rstrip())
         else:
             for _ in range(count):
@@ -327,13 +340,11 @@ def activate(terms_yaml_path: Optional[str] = None,
             print("❌ Usage: %nb_search <keyword> [base_dir=~/Workspace/jupyter]")
             return
 
-        # Parse optional base_dir=...
         base_dir = getattr(activate, "_default_base_dir", "~/Workspace/jupyter")
         m = re.search(r'\bbase_dir\s*=\s*([^\s]+)', line)
         if m:
             base_dir = m.group(1)
 
-        # keyword is everything before base_dir=...
         keyword = line[: m.start()].strip() if m else line
         if not keyword:
             print("❌ Please provide a keyword to search.")
@@ -344,7 +355,6 @@ def activate(terms_yaml_path: Optional[str] = None,
             print(f"❌ No matches found for '{keyword}' under {Path(base_dir).expanduser().resolve()}")
             return
 
-        # Markdown span for bold red
         def highlight_md(match):
             return f"<span style='color:red;font-weight:bold;'>{match.group(0)}</span>"
 
@@ -364,7 +374,7 @@ def activate(terms_yaml_path: Optional[str] = None,
         print(f"\n✅ {sum(len(v) for v in results.values())} match(es) across {len(results)} notebook(s).")
 
 
-# When imported in a Python session, users will call:
+# When imported in a Python session, call:
 #   from term_magic import activate
 #   activate()
-# which registers the magics.
+# to register the magics.
