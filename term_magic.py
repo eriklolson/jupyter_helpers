@@ -239,23 +239,21 @@ def terms(line: str = ""):
     """
     Insert term templates into a new Markdown cell.
 
-    Usage (template_term by default):
-      %terms numpy,array,vector           # uses 'template' or stitched 'template_term' (no tc)
-      %terms BinarySearchTree tc          # include time complexity (`tc`) before footer
+    Defaults:
+      - template_term: NO tc unless you append `tc`
+      - template_diagram (t4): ALWAYS includes tc2 (no toggle needed)
 
-    Other whole-template aliases:
-      %terms t2 numpy,vector              # uses 'template_math'
-      %terms t3                           # uses 'template_func' once
-      %terms t1 5                         # uses default template 5 times
-      %terms t4 Graph,Tree                # uses 'template_diagram'
+    Examples:
+      %terms BinarySearchTree              # template_term (no tc)
+      %terms BinarySearchTree tc           # template_term (with tc)
+      %terms t4 Graph                      # template_diagram (with tc2 by default)
+      %terms t4 Graph tc                   # template_diagram (tc ignored; tc2 still included)
 
-    Section-only (from template_term):
+    Section-only (unchanged):
       %terms h Term1,Term2
       %terms ex pandas
       %terms n 3
       %terms fo
-
-    Section-only (from template_diagram):
       %terms h2 Graph
       %terms di Tree
       %terms n2 2
@@ -264,15 +262,12 @@ def terms(line: str = ""):
     """
     line = (line or "").strip()
 
-    # Whole-template aliases
     tmpl_key_map = {
-        "t1": None,               # prefer 'template'; else stitch 'template_term'
+        "t1": None,                # prefer 'template'; else stitch 'template_term'
         "t2": "template_math",
         "t3": "template_func",
         "t4": "template_diagram",
     }
-
-    # Section-only selectors
     section_keys = {"h", "ex", "n", "fo", "h2", "di", "n2", "ex2", "fo2"}
 
     parts = line.split(maxsplit=1)
@@ -293,71 +288,67 @@ def terms(line: str = ""):
     else:
         rest = ""
 
-    # Load YAML
     data = _load_terms_yaml(getattr(activate, "_terms_yaml_path", None))
 
-    # Special handling: allow `%terms <terms...> tc` to include time complexity
-    include_tc = False
-    tokens_for_terms: list[str] = []
+    # Parse trailing toggle ONLY for template_term; diagram always includes tc2 by default.
+    include_tc_term = False
     if rest:
-        # split by comma ONLY for terms list; but we also allow a trailing "tc"
-        # Accept either a comma-separated list OR a single token list with a trailing `tc`.
-        # Strategy:
-        #   - If rest contains spaces, we consider a trailing "tc" after the last comma group.
-        #   - We check the final non-empty token case-insensitively for "tc".
-        # First, split on whitespace to see if user clearly appended "tc" as a separate word.
         ws_parts = rest.split()
         if ws_parts and ws_parts[-1].lower() == "tc":
-            include_tc = True
-            rest_wo_tc = " ".join(ws_parts[:-1]).strip()
+            include_tc_term = True
+            rest_wo_toggle = " ".join(ws_parts[:-1]).strip()
         else:
-            rest_wo_tc = rest
-
-        # Now parse terms/count from the `rest_wo_tc`
-        numeric = rest_wo_tc.isdigit()
-        if numeric:
-            count = int(rest_wo_tc)
-            if count <= 0:
-                print("Nothing to insert (count <= 0).")
-                return
-            terms_list = []
-        else:
-            # Allow comma-separated terms (possibly still containing spaces in names, so split once by commas)
-            terms_list = [t.strip() for t in rest_wo_tc.split(",") if t.strip()]
-            count = 1 if not terms_list else 0
+            rest_wo_toggle = rest
     else:
-        include_tc = False
-        terms_list = []
-        count = 1
+        rest_wo_toggle = ""
 
-    # Resolve template string
+    # Parse terms or count
+    if rest_wo_toggle.isdigit():
+        count = int(rest_wo_toggle)
+        if count <= 0:
+            print("Nothing to insert (count <= 0).")
+            return
+        terms_list = []
+    else:
+        terms_list = [t.strip() for t in rest_wo_toggle.split(",") if t.strip()]
+        count = 1 if not terms_list else 0
+
+    # Section-only mode: ignore tc logic
     if section_hint:
         template_str = _select_template_section(data, section_hint)
-        # For section-only, we ignore the `tc` toggle entirely (by design).
+        active_template = "section"
     else:
-        # If no explicit key_hint and no "template" present, default to template_term
         if key_hint is None and "template" not in data and "template_term" in data:
             key_hint = "template_term"
+        active_template = key_hint or "template"
 
-        if key_hint == "template_term" and isinstance(data.get("template_term"), dict):
-            # Build stitched template_term with optional tc just before footer
+        if active_template == "template_term" and isinstance(data.get("template_term"), dict):
             order = ["h", "ex", "n", "fo"]
-            if include_tc:
-                # insert tc before 'fo' (footer) if present
-                if "tc" in data["template_term"]:
-                    insert_idx = max(0, order.index("fo")) if "fo" in order else len(order)
-                    order = order[:insert_idx] + ["tc"] + order[insert_idx:]
+            if include_tc_term and "tc" in data["template_term"]:
+                insert_idx = order.index("fo") if "fo" in order else len(order)
+                order = order[:insert_idx] + ["tc"] + order[insert_idx:]
             parts_tm = [data["template_term"].get(sect) for sect in order]
             parts_tm = [p for p in parts_tm if isinstance(p, str)]
             if not parts_tm:
                 raise ValueError("template_term is empty or missing sections")
             template_str = "\n".join(parts_tm)
+
+        elif active_template == "template_diagram" and isinstance(data.get("template_diagram"), dict):
+            # ALWAYS include tc2 (before footer) if present
+            order = ["h2", "di", "n2", "ex2", "fo2"]
+            if "tc2" in data["template_diagram"]:
+                insert_idx = order.index("fo2") if "fo2" in order else len(order)
+                order = order[:insert_idx] + ["tc2"] + order[insert_idx:]
+            parts_td = [data["template_diagram"].get(sect) for sect in order]
+            parts_td = [p for p in parts_td if isinstance(p, str)]
+            if not parts_td:
+                raise ValueError("template_diagram is empty or missing sections")
+            template_str = "\n".join(parts_td)
+
         else:
-            # Default behavior for other templates (or single 'template' key)
             template_str = _select_template_block(data, key_hint)
 
     def _blank_mapping() -> Dict[str, str]:
-        # Keep placeholders comprehensive so all templates render cleanly
         return {
             "Term": "{{Term}}",
             "FunctionName": "{{FunctionName}}",
@@ -384,7 +375,6 @@ def terms(line: str = ""):
             "Param5": "{{Param5}}",
             "Definition1": "{{Definition1}}",
             "Definition2": "{{Definition2}}",
-            # Time complexity placeholders (used if tc/tc2 present in YAML)
             "AverageCase": "{{AverageCase}}",
             "WorstCase": "{{WorstCase}}",
             "AverageName": "{{AverageName}}",
@@ -403,8 +393,14 @@ def terms(line: str = ""):
 
     final_md = "\n\n".join(blocks)
     _insert_markdown_cell(final_md)
-    print(f"✅ Inserted {len(blocks)} template block(s){' with tc' if (include_tc and key_hint in (None, 'template_term')) else ''}.")
 
+    # Status message
+    tc_msg = ""
+    if active_template == "template_term" and include_tc_term:
+        tc_msg = " with tc"
+    elif active_template == "template_diagram":
+        tc_msg = " with tc2"
+    print(f"✅ Inserted {len(blocks)} template block(s){tc_msg}.")
 
     @register_line_magic
     def cp_jup_temp(line: str = ""):

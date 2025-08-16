@@ -98,7 +98,7 @@ template_func: |
 
 template_diagram:
   h2: |
-    ## {{Term}}
+    # {{Term}}
     {{Definition}}
 
   di: |
