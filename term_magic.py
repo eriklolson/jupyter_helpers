@@ -9,12 +9,20 @@ Jupyter line magics:
         %terms t2 numpy,vector              # use 'template_math' for given terms
         %terms t3                           # insert one 'template_func' block
         %terms t1 5                         # use default template 5 times
+        %terms t4 Graph,Tree                # NEW: use 'template_diagram' for given terms
 
-      NEW (section-only from template_term):
-        %terms h Term1,Term2                # insert only header block(s) for the terms
+      Section-only (from template_term):
+        %terms h Term1,Term2                # insert only header block(s)
         %terms ex pandas                    # insert only example block
         %terms n 3                          # insert notes block 3 times (blank)
         %terms fo                           # insert footer once
+
+      NEW: Section-only (from template_diagram):
+        %terms h2 Graph                     # header/definition
+        %terms di Tree                      # diagram block
+        %terms n2 2                         # notes (count)
+        %terms ex2                          # example block (1)
+        %terms fo2                          # footer (1)
 
   - %cp_jup_temp <FolderName>: create templated notebook subdir via cptemp.cptemp()
 
@@ -87,8 +95,8 @@ def _load_terms_yaml(yaml_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Load the user's terms_template.yaml. Supports:
       - single 'template' key (string)
-      - multiple named templates: 'template_term', 'template_math', 'template_func'
-      - sectioned dict under 'template_term' with keys 'h', 'ex', 'n', 'fo'
+      - multiple named templates: 'template_term', 'template_math', 'template_func', 'template_diagram'
+      - sectioned dicts under 'template_term' (h/ex/n/fo) and 'template_diagram' (h2/di/n2/ex2/fo2)
     """
     import yaml  # lazy import
     default_path = Path("~/scripts/jupyter_helpers/terms_template.yaml").expanduser()
@@ -104,10 +112,10 @@ def _select_template_block(data: Dict[str, Any], key_hint: str | None = None) ->
     """
     Select a template string from YAML.
     Priority:
-      - key_hint in {'template', 'template_term', 'template_math', 'template_func'}
+      - key_hint in {'template', 'template_term', 'template_math', 'template_func', 'template_diagram'}
       - 'template' if present (single big block)
+      - else stitch sections for 'template_term' or 'template_diagram' if available
       - else first string value in the YAML
-      - else stitch 'template_term' sections (h/ex/n/fo) if present
     """
     preferred_keys: List[str] = []
     if key_hint:
@@ -118,13 +126,19 @@ def _select_template_block(data: Dict[str, Any], key_hint: str | None = None) ->
         if k in data and isinstance(data[k], str):
             return data[k]
 
+    # If key_hint points to a sectioned dict, stitch it
     if key_hint and key_hint in data and isinstance(data[key_hint], dict):
-        order = ["h", "ex", "n", "fo"]
+        order_map = {
+            "template_term": ["h", "ex", "n", "fo"],
+            "template_diagram": ["h2", "di", "n2", "ex2", "fo2"],
+        }
+        order = order_map.get(key_hint, [])
         parts = [data[key_hint].get(sect) for sect in order]
         parts = [p for p in parts if isinstance(p, str)]
         if parts:
             return "\n".join(parts)
 
+    # Otherwise, try stitching known sectioned templates in a sensible order
     if "template_term" in data and isinstance(data["template_term"], dict):
         order = ["h", "ex", "n", "fo"]
         parts = [data["template_term"].get(sect) for sect in order]
@@ -132,6 +146,14 @@ def _select_template_block(data: Dict[str, Any], key_hint: str | None = None) ->
         if parts:
             return "\n".join(parts)
 
+    if "template_diagram" in data and isinstance(data["template_diagram"], dict):
+        order = ["h2", "di", "n2", "ex2", "fo2"]
+        parts = [data["template_diagram"].get(sect) for sect in order]
+        parts = [p for p in parts if isinstance(p, str)]
+        if parts:
+            return "\n".join(parts)
+
+    # Fallback to the first string value
     for v in data.values():
         if isinstance(v, str):
             return v
@@ -141,15 +163,25 @@ def _select_template_block(data: Dict[str, Any], key_hint: str | None = None) ->
 
 def _select_template_section(data: Dict[str, Any], section: str) -> str:
     """
-    Return a single section ('h'|'ex'|'n'|'fo') from template_term.
+    Return a single section:
+      - 'h'|'ex'|'n'|'fo' from template_term
+      - 'h2'|'di'|'n2'|'ex2'|'fo2' from template_diagram
     """
+    # Check template_term sections
     tt = data.get("template_term")
-    if not isinstance(tt, dict):
-        raise ValueError("template_term is not a sectioned mapping in terms_template.yaml")
-    block = tt.get(section)
-    if not isinstance(block, str):
-        raise ValueError(f"template_term['{section}'] not found or not a string")
-    return block
+    if isinstance(tt, dict) and section in {"h", "ex", "n", "fo"}:
+        block = tt.get(section)
+        if isinstance(block, str):
+            return block
+
+    # Check template_diagram sections
+    td = data.get("template_diagram")
+    if isinstance(td, dict) and section in {"h2", "di", "n2", "ex2", "fo2"}:
+        block = td.get(section)
+        if isinstance(block, str):
+            return block
+
+    raise ValueError(f"Section '{section}' not found in template_term/template_diagram or not a string")
 
 
 def _render(template: str, mapping: Dict[str, str]) -> str:
@@ -200,12 +232,20 @@ def activate(terms_yaml_path: Optional[str] = None,
           %terms t2 numpy,vector             # uses 'template_math'
           %terms t3                          # uses 'template_func' once
           %terms t1 5                        # uses default template 5 times
+          %terms t4 Graph,Tree               # uses 'template_diagram'
 
         Section-only (from template_term):
           %terms h Term1,Term2
           %terms ex pandas
           %terms n 3
           %terms fo
+
+        Section-only (from template_diagram):
+          %terms h2 Graph
+          %terms di Tree
+          %terms n2 2
+          %terms ex2
+          %terms fo2
         """
         line = (line or "").strip()
 
@@ -214,10 +254,11 @@ def activate(terms_yaml_path: Optional[str] = None,
             "t1": None,               # prefer 'template'; else stitch 'template_term'
             "t2": "template_math",
             "t3": "template_func",
+            "t4": "template_diagram", # NEW
         }
 
         # Section-only selectors
-        section_keys = {"h", "ex", "n", "fo"}
+        section_keys = {"h", "ex", "n", "fo", "h2", "di", "n2", "ex2", "fo2"}  # NEW diagram keys
 
         parts = line.split(maxsplit=1)
         key_hint = None
@@ -273,6 +314,7 @@ def activate(terms_yaml_path: Optional[str] = None,
                 "Code/ML Definition": "{{Code/ML Definition}}",
                 "Math Definition": "{{Math Definition}}",
                 "Statistics Definition": "{{Statistics Definition}}",
+                "Diagram": "{{Diagram}}",  # NEW for diagram template
                 "Note1": "{{Note1}}",
                 "Note2": "{{Note2}}",
                 "MethodName": "{{MethodName}}",
