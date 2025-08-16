@@ -221,130 +221,190 @@ def activate(terms_yaml_path: Optional[str] = None,
     activate._terms_yaml_path = terms_yaml_path
     activate._default_base_dir = default_base_dir
 
-    @register_line_magic
-    def terms(line: str = ""):
-        """
-        Insert term templates into a new Markdown cell.
+# --- PATCH for ~/scripts/jupyter_helpers/term_magic.py ---
+# Drop-in replacement for the `terms` line magic to optionally include the
+# time-complexity block (`tc`) ONLY when the user appends `tc` after the term(s).
+#
+# Examples:
+#   %terms BinarySearchTree               -> inserts template_term (no tc)
+#   %terms BinarySearchTree tc            -> inserts template_term incl. tc
+#   %terms numpy,array tc                 -> inserts template_term for both, incl. tc
+#   %terms t2 KNN                         -> unchanged: uses template_math
+#   %terms h Term1,Term2                  -> unchanged: header-only (section select)
+#
+# Paste this inside activate(...), replacing the existing `@register_line_magic def terms(...)`.
 
-        Usage:
-          %terms numpy,array,vector          # uses 'template' or stitched 'template_term'
-          %terms 3                           # insert 3 blank/default blocks
-          %terms t2 numpy,vector             # uses 'template_math'
-          %terms t3                          # uses 'template_func' once
-          %terms t1 5                        # uses default template 5 times
-          %terms t4 Graph,Tree               # uses 'template_diagram'
+@register_line_magic
+def terms(line: str = ""):
+    """
+    Insert term templates into a new Markdown cell.
 
-        Section-only (from template_term):
-          %terms h Term1,Term2
-          %terms ex pandas
-          %terms n 3
-          %terms fo
+    Usage (template_term by default):
+      %terms numpy,array,vector           # uses 'template' or stitched 'template_term' (no tc)
+      %terms BinarySearchTree tc          # include time complexity (`tc`) before footer
 
-        Section-only (from template_diagram):
-          %terms h2 Graph
-          %terms di Tree
-          %terms n2 2
-          %terms ex2
-          %terms fo2
-        """
-        line = (line or "").strip()
+    Other whole-template aliases:
+      %terms t2 numpy,vector              # uses 'template_math'
+      %terms t3                           # uses 'template_func' once
+      %terms t1 5                         # uses default template 5 times
+      %terms t4 Graph,Tree                # uses 'template_diagram'
 
-        # Whole-template aliases
-        tmpl_key_map = {
-            "t1": None,               # prefer 'template'; else stitch 'template_term'
-            "t2": "template_math",
-            "t3": "template_func",
-            "t4": "template_diagram", # NEW
-        }
+    Section-only (from template_term):
+      %terms h Term1,Term2
+      %terms ex pandas
+      %terms n 3
+      %terms fo
 
-        # Section-only selectors
-        section_keys = {"h", "ex", "n", "fo", "h2", "di", "n2", "ex2", "fo2"}  # NEW diagram keys
+    Section-only (from template_diagram):
+      %terms h2 Graph
+      %terms di Tree
+      %terms n2 2
+      %terms ex2
+      %terms fo2
+    """
+    line = (line or "").strip()
 
-        parts = line.split(maxsplit=1)
-        key_hint = None
+    # Whole-template aliases
+    tmpl_key_map = {
+        "t1": None,               # prefer 'template'; else stitch 'template_term'
+        "t2": "template_math",
+        "t3": "template_func",
+        "t4": "template_diagram",
+    }
+
+    # Section-only selectors
+    section_keys = {"h", "ex", "n", "fo", "h2", "di", "n2", "ex2", "fo2"}
+
+    parts = line.split(maxsplit=1)
+    key_hint = None
+    rest = ""
+    section_hint = None
+
+    if parts:
+        head = parts[0].lower()
+        if head in section_keys:
+            section_hint = head
+            rest = parts[1].strip() if len(parts) > 1 else ""
+        elif head in tmpl_key_map:
+            key_hint = tmpl_key_map[head]
+            rest = parts[1].strip() if len(parts) > 1 else ""
+        else:
+            rest = line
+    else:
         rest = ""
-        section_hint = None
 
-        if parts:
-            head = parts[0].lower()
-            if head in section_keys:
-                section_hint = head
-                rest = parts[1].strip() if len(parts) > 1 else ""
-            elif head in tmpl_key_map:
-                key_hint = tmpl_key_map[head]
-                rest = parts[1].strip() if len(parts) > 1 else ""
-            else:
-                rest = line
+    # Load YAML
+    data = _load_terms_yaml(getattr(activate, "_terms_yaml_path", None))
+
+    # Special handling: allow `%terms <terms...> tc` to include time complexity
+    include_tc = False
+    tokens_for_terms: list[str] = []
+    if rest:
+        # split by comma ONLY for terms list; but we also allow a trailing "tc"
+        # Accept either a comma-separated list OR a single token list with a trailing `tc`.
+        # Strategy:
+        #   - If rest contains spaces, we consider a trailing "tc" after the last comma group.
+        #   - We check the final non-empty token case-insensitively for "tc".
+        # First, split on whitespace to see if user clearly appended "tc" as a separate word.
+        ws_parts = rest.split()
+        if ws_parts and ws_parts[-1].lower() == "tc":
+            include_tc = True
+            rest_wo_tc = " ".join(ws_parts[:-1]).strip()
         else:
-            rest = ""
+            rest_wo_tc = rest
 
-        # Load YAML
-        data = _load_terms_yaml(activate._terms_yaml_path)
-
-        # Resolve template string
-        if section_hint:
-            template_str = _select_template_section(data, section_hint)
-        else:
-            if key_hint is None and "template" not in data and "template_term" in data:
-                key_hint = "template_term"
-            template_str = _select_template_block(data, key_hint)
-
-        # Parse terms/count
-        count = 0
-        terms_list: List[str] = []
-        numeric = rest.isdigit()
+        # Now parse terms/count from the `rest_wo_tc`
+        numeric = rest_wo_tc.isdigit()
         if numeric:
-            count = int(rest)
+            count = int(rest_wo_tc)
             if count <= 0:
                 print("Nothing to insert (count <= 0).")
                 return
+            terms_list = []
         else:
-            terms_list = [t.strip() for t in rest.split(",") if t.strip()] if rest else []
-            if not terms_list:
-                count = 1
+            # Allow comma-separated terms (possibly still containing spaces in names, so split once by commas)
+            terms_list = [t.strip() for t in rest_wo_tc.split(",") if t.strip()]
+            count = 1 if not terms_list else 0
+    else:
+        include_tc = False
+        terms_list = []
+        count = 1
 
-        def _blank_mapping() -> Dict[str, str]:
-            return {
-                "Term": "{{Term}}",
-                "FunctionName": "{{FunctionName}}",
-                "ModulePath": "{{ModulePath}}",
-                "Description": "{{Description}}",
-                "CodeExample": "{{CodeExample}}",
-                "Code/ML Example": "{{Code/ML Example}}",
-                "Code/ML Definition": "{{Code/ML Definition}}",
-                "Math Definition": "{{Math Definition}}",
-                "Statistics Definition": "{{Statistics Definition}}",
-                "Diagram": "{{Diagram}}",  # NEW for diagram template
-                "Note1": "{{Note1}}",
-                "Note2": "{{Note2}}",
-                "MethodName": "{{MethodName}}",
-                "MethodSignature": "{{MethodSignature}}",
-                "MethodDescription": "{{MethodDescription}}",
-                "ExampleCode": "{{ExampleCode}}",
-                "Default1": "{{Default1}}",
-                "Default2": "{{Default2}}",
-                "Param1": "{{Param1}}",
-                "Param2": "{{Param2}}",
-                "Param3": "{{Param3}}",
-                "Param4": "{{Param4}}",
-                "Param5": "{{Param5}}",
-                "Definition1": "{{Definition1}}",
-                "Definition2": "{{Definition2}}",
-            }
+    # Resolve template string
+    if section_hint:
+        template_str = _select_template_section(data, section_hint)
+        # For section-only, we ignore the `tc` toggle entirely (by design).
+    else:
+        # If no explicit key_hint and no "template" present, default to template_term
+        if key_hint is None and "template" not in data and "template_term" in data:
+            key_hint = "template_term"
 
-        blocks: List[str] = []
-        if terms_list:
-            for term in terms_list:
-                mapping = _blank_mapping()
-                mapping.update({"Term": term, "FunctionName": term})
-                blocks.append(_render(template_str, mapping).rstrip())
+        if key_hint == "template_term" and isinstance(data.get("template_term"), dict):
+            # Build stitched template_term with optional tc just before footer
+            order = ["h", "ex", "n", "fo"]
+            if include_tc:
+                # insert tc before 'fo' (footer) if present
+                if "tc" in data["template_term"]:
+                    insert_idx = max(0, order.index("fo")) if "fo" in order else len(order)
+                    order = order[:insert_idx] + ["tc"] + order[insert_idx:]
+            parts_tm = [data["template_term"].get(sect) for sect in order]
+            parts_tm = [p for p in parts_tm if isinstance(p, str)]
+            if not parts_tm:
+                raise ValueError("template_term is empty or missing sections")
+            template_str = "\n".join(parts_tm)
         else:
-            for _ in range(count):
-                blocks.append(_render(template_str, _blank_mapping()).rstrip())
+            # Default behavior for other templates (or single 'template' key)
+            template_str = _select_template_block(data, key_hint)
 
-        final_md = "\n\n".join(blocks)
-        _insert_markdown_cell(final_md)
-        print(f"✅ Inserted {len(blocks)} template block(s).")
+    def _blank_mapping() -> Dict[str, str]:
+        # Keep placeholders comprehensive so all templates render cleanly
+        return {
+            "Term": "{{Term}}",
+            "FunctionName": "{{FunctionName}}",
+            "ModulePath": "{{ModulePath}}",
+            "Description": "{{Description}}",
+            "CodeExample": "{{CodeExample}}",
+            "Code/ML Example": "{{Code/ML Example}}",
+            "Code/ML Definition": "{{Code/ML Definition}}",
+            "Math Definition": "{{Math Definition}}",
+            "Statistics Definition": "{{Statistics Definition}}",
+            "Diagram": "{{Diagram}}",
+            "Note1": "{{Note1}}",
+            "Note2": "{{Note2}}",
+            "MethodName": "{{MethodName}}",
+            "MethodSignature": "{{MethodSignature}}",
+            "MethodDescription": "{{MethodDescription}}",
+            "ExampleCode": "{{ExampleCode}}",
+            "Default1": "{{Default1}}",
+            "Default2": "{{Default2}}",
+            "Param1": "{{Param1}}",
+            "Param2": "{{Param2}}",
+            "Param3": "{{Param3}}",
+            "Param4": "{{Param4}}",
+            "Param5": "{{Param5}}",
+            "Definition1": "{{Definition1}}",
+            "Definition2": "{{Definition2}}",
+            # Time complexity placeholders (used if tc/tc2 present in YAML)
+            "AverageCase": "{{AverageCase}}",
+            "WorstCase": "{{WorstCase}}",
+            "AverageName": "{{AverageName}}",
+            "WorstName": "{{WorstName}}",
+        }
+
+    blocks: List[str] = []
+    if terms_list:
+        for term in terms_list:
+            mapping = _blank_mapping()
+            mapping.update({"Term": term, "FunctionName": term})
+            blocks.append(_render(template_str, mapping).rstrip())
+    else:
+        for _ in range(count):
+            blocks.append(_render(template_str, _blank_mapping()).rstrip())
+
+    final_md = "\n\n".join(blocks)
+    _insert_markdown_cell(final_md)
+    print(f"✅ Inserted {len(blocks)} template block(s){' with tc' if (include_tc and key_hint in (None, 'template_term')) else ''}.")
+
 
     @register_line_magic
     def cp_jup_temp(line: str = ""):
@@ -365,6 +425,7 @@ def activate(terms_yaml_path: Optional[str] = None,
             print(f"✅ Created templated notebooks in: {target}")
         except Exception as e:
             print(f"⚠ Error creating notebooks: {e}")
+
 
     @register_line_magic
     def nb_search(line: str = ""):

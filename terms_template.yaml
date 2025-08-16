@@ -10,9 +10,14 @@ template_term:
     >~~~~~~
 
   n: |
-    > #### Notes:
-    > -  {{Note1}}
-    > -  {{Note2}}
+    #### Notes:
+    -  {{Note1}}
+    -  {{Note2}}
+
+  tc: |
+    #### ⏱️ Time Complexity:
+    🟡 Average (typical): ${{AverageCase}}$ — [{{AverageName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{AverageName}})
+    🔴 Worst (guaranteed): ${{WorstCase}}$ — [{{WorstName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{WorstName}})
 
   fo: |
     * * *
@@ -33,6 +38,10 @@ template_math: |
   >$$
   > {{Math Example}}
   >$$
+
+  #### ⏱️ Time Complexity:
+  - Average (typical): ${{AverageCase}}$ — [{{AverageName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{AverageName}})
+  - Worst (guaranteed): ${{WorstCase}}$ — [{{WorstName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{WorstName}})
 
   #### Notes:
   -  {{Note1}}
@@ -80,6 +89,10 @@ template_func: |
   > {{MethodExampleCode}}
   >~~~~~~
 
+  #### ⏱️ Time Complexity:
+  🟡 Average (typical): ${{AverageCase}}$ — [{{AverageName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{AverageName}})
+  🔴 Worst (guaranteed): ${{WorstCase}}$ — [{{WorstName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{WorstName}})
+
   * * *
   * * *
 
@@ -104,6 +117,11 @@ template_diagram:
     >~~~~~~python
     > {{CodeExample}}
     >~~~~~~
+
+  tc2: |
+    #### ⏱️ Time Complexity:
+    🟡 Average (typical): ${{AverageCase}}$ — [{{AverageName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{AverageName}})
+    🔴 Worst (guaranteed): ${{WorstCase}}$ — [{{WorstName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{WorstName}})
 
   fo2: |
     * * *
