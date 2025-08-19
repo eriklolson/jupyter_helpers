@@ -9,7 +9,8 @@ Jupyter line magics:
         %terms t2 numpy,vector              # use 'template_math' for given terms
         %terms t3                           # insert one 'template_func' block
         %terms t1 5                         # use default template 5 times
-        %terms t4 Graph,Tree                # NEW: use 'template_diagram' for given terms
+        %terms t4 Graph,Tree                # 'template_diagram' for given terms
+        %terms t5 AVL,Red-Black             # NEW: 'template_tree' for given terms
 
       Section-only (from template_term):
         %terms h Term1,Term2                # insert only header block(s)
@@ -17,12 +18,21 @@ Jupyter line magics:
         %terms n 3                          # insert notes block 3 times (blank)
         %terms fo                           # insert footer once
 
-      NEW: Section-only (from template_diagram):
+      Section-only (from template_diagram):
         %terms h2 Graph                     # header/definition
         %terms di Tree                      # diagram block
         %terms n2 2                         # notes (count)
         %terms ex2                          # example block (1)
         %terms fo2                          # footer (1)
+
+      NEW: Section-only (from template_tree):
+        %terms trh AVL                      # tree header/definition
+        %terms trd AVL                      # tree diagram
+        %terms trp 2                        # properties (count)
+        %terms tra 1                        # common applications (count)
+        %terms tree                         # python example (1)
+        %terms trt                          # time complexity notes (1)
+        %terms trf                          # footer (1)
 
   - %cp_jup_temp <FolderName>: create templated notebook subdir via cptemp.cptemp()
 
@@ -95,8 +105,11 @@ def _load_terms_yaml(yaml_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Load the user's terms_template.yaml. Supports:
       - single 'template' key (string)
-      - multiple named templates: 'template_term', 'template_math', 'template_func', 'template_diagram'
-      - sectioned dicts under 'template_term' (h/ex/n/fo) and 'template_diagram' (h2/di/n2/ex2/fo2)
+      - multiple named templates: 'template_term', 'template_math', 'template_func', 'template_diagram', 'template_tree'
+      - sectioned dicts:
+          * template_term: h/ex/n/tc/fo (tc optional)
+          * template_diagram: h2/di/n2/ex2/tc2/fo2 (tc2 optional)
+          * template_tree: trh/trd/trp/tra/tree/trt/trf (trt optional)
     """
     import yaml  # lazy import
     default_path = Path("~/scripts/jupyter_helpers/terms_template.yaml").expanduser()
@@ -112,9 +125,9 @@ def _select_template_block(data: Dict[str, Any], key_hint: str | None = None) ->
     """
     Select a template string from YAML.
     Priority:
-      - key_hint in {'template', 'template_term', 'template_math', 'template_func', 'template_diagram'}
+      - key_hint in {'template', 'template_term', 'template_math', 'template_func', 'template_diagram', 'template_tree'}
       - 'template' if present (single big block)
-      - else stitch sections for 'template_term' or 'template_diagram' if available
+      - else stitch sections for known sectioned templates
       - else first string value in the YAML
     """
     preferred_keys: List[str] = []
@@ -126,29 +139,40 @@ def _select_template_block(data: Dict[str, Any], key_hint: str | None = None) ->
         if k in data and isinstance(data[k], str):
             return data[k]
 
-    # If key_hint points to a sectioned dict, stitch it
+    # If key_hint points to a sectioned dict, stitch it in the defined order
     if key_hint and key_hint in data and isinstance(data[key_hint], dict):
         order_map = {
-            "template_term": ["h", "ex", "n", "fo"],
-            "template_diagram": ["h2", "di", "n2", "ex2", "fo2"],
+            "template_term": ["h", "ex", "n", "tc", "fo"],            # 'tc' included if present
+            "template_diagram": ["h2", "di", "n2", "ex2", "tc2", "fo2"],
+            "template_tree": ["trh", "trd", "trp", "tra", "tree", "trt", "trf"],
         }
         order = order_map.get(key_hint, [])
-        parts = [data[key_hint].get(sect) for sect in order]
-        parts = [p for p in parts if isinstance(p, str)]
+        parts = []
+        for sect in order:
+            val = data[key_hint].get(sect)
+            if isinstance(val, str):
+                parts.append(val)
         if parts:
             return "\n".join(parts)
 
     # Otherwise, try stitching known sectioned templates in a sensible order
     if "template_term" in data and isinstance(data["template_term"], dict):
-        order = ["h", "ex", "n", "fo"]
+        order = ["h", "ex", "n", "tc", "fo"]
         parts = [data["template_term"].get(sect) for sect in order]
         parts = [p for p in parts if isinstance(p, str)]
         if parts:
             return "\n".join(parts)
 
     if "template_diagram" in data and isinstance(data["template_diagram"], dict):
-        order = ["h2", "di", "n2", "ex2", "fo2"]
+        order = ["h2", "di", "n2", "ex2", "tc2", "fo2"]
         parts = [data["template_diagram"].get(sect) for sect in order]
+        parts = [p for p in parts if isinstance(p, str)]
+        if parts:
+            return "\n".join(parts)
+
+    if "template_tree" in data and isinstance(data["template_tree"], dict):
+        order = ["trh", "trd", "trp", "tra", "tree", "trt", "trf"]
+        parts = [data["template_tree"].get(sect) for sect in order]
         parts = [p for p in parts if isinstance(p, str)]
         if parts:
             return "\n".join(parts)
@@ -166,22 +190,30 @@ def _select_template_section(data: Dict[str, Any], section: str) -> str:
     Return a single section:
       - 'h'|'ex'|'n'|'fo' from template_term
       - 'h2'|'di'|'n2'|'ex2'|'fo2' from template_diagram
+      - 'trh'|'trd'|'trp'|'tra'|'tree'|'trt'|'trf' from template_tree
     """
-    # Check template_term sections
+    # template_term sections
     tt = data.get("template_term")
-    if isinstance(tt, dict) and section in {"h", "ex", "n", "fo"}:
+    if isinstance(tt, dict) and section in {"h", "ex", "n", "fo", "tc"}:
         block = tt.get(section)
         if isinstance(block, str):
             return block
 
-    # Check template_diagram sections
+    # template_diagram sections
     td = data.get("template_diagram")
-    if isinstance(td, dict) and section in {"h2", "di", "n2", "ex2", "fo2"}:
+    if isinstance(td, dict) and section in {"h2", "di", "n2", "ex2", "fo2", "tc2"}:
         block = td.get(section)
         if isinstance(block, str):
             return block
 
-    raise ValueError(f"Section '{section}' not found in template_term/template_diagram or not a string")
+    # template_tree sections
+    ttree = data.get("template_tree")
+    if isinstance(ttree, dict) and section in {"trh", "trd", "trp", "tra", "tree", "trt", "trf"}:
+        block = ttree.get(section)
+        if isinstance(block, str):
+            return block
+
+    raise ValueError(f"Section '{section}' not found or not a string in available templates")
 
 
 def _render(template: str, mapping: Dict[str, str]) -> str:
@@ -221,19 +253,8 @@ def activate(terms_yaml_path: Optional[str] = None,
     activate._terms_yaml_path = terms_yaml_path
     activate._default_base_dir = default_base_dir
 
-# --- PATCH for ~/scripts/jupyter_helpers/term_magic.py ---
-# Drop-in replacement for the `terms` line magic to optionally include the
-# time-complexity block (`tc`) ONLY when the user appends `tc` after the term(s).
-#
-# Examples:
-#   %terms BinarySearchTree               -> inserts template_term (no tc)
-#   %terms BinarySearchTree tc            -> inserts template_term incl. tc
-#   %terms numpy,array tc                 -> inserts template_term for both, incl. tc
-#   %terms t2 KNN                         -> unchanged: uses template_math
-#   %terms h Term1,Term2                  -> unchanged: header-only (section select)
-#
-# Paste this inside activate(...), replacing the existing `@register_line_magic def terms(...)`.
 
+# --- Magics ---
 @register_line_magic
 def terms(line: str = ""):
     """
@@ -241,15 +262,16 @@ def terms(line: str = ""):
 
     Defaults:
       - template_term: NO tc unless you append `tc`
-      - template_diagram (t4): ALWAYS includes tc2 (no toggle needed)
+      - template_diagram (t4): ALWAYS includes tc2 (if present)
+      - template_tree (t5): ALWAYS includes trt (if present)
 
     Examples:
       %terms BinarySearchTree              # template_term (no tc)
       %terms BinarySearchTree tc           # template_term (with tc)
-      %terms t4 Graph                      # template_diagram (with tc2 by default)
-      %terms t4 Graph tc                   # template_diagram (tc ignored; tc2 still included)
+      %terms t4 Graph                      # template_diagram (with tc2 if present)
+      %terms t5 AVL,Red-Black              # template_tree (with trt if present)
 
-    Section-only (unchanged):
+    Section-only:
       %terms h Term1,Term2
       %terms ex pandas
       %terms n 3
@@ -259,6 +281,13 @@ def terms(line: str = ""):
       %terms n2 2
       %terms ex2
       %terms fo2
+      %terms trh AVL
+      %terms trd AVL
+      %terms trp 2
+      %terms tra
+      %terms tree
+      %terms trt
+      %terms trf
     """
     line = (line or "").strip()
 
@@ -267,8 +296,13 @@ def terms(line: str = ""):
         "t2": "template_math",
         "t3": "template_func",
         "t4": "template_diagram",
+        "t5": "template_tree",     # NEW
     }
-    section_keys = {"h", "ex", "n", "fo", "h2", "di", "n2", "ex2", "fo2"}
+    section_keys = {
+        "h", "ex", "n", "fo",
+        "h2", "di", "n2", "ex2", "fo2",
+        "trh", "trd", "trp", "tra", "tree", "trt", "trf"  # NEW
+    }
 
     parts = line.split(maxsplit=1)
     key_hint = None
@@ -290,7 +324,7 @@ def terms(line: str = ""):
 
     data = _load_terms_yaml(getattr(activate, "_terms_yaml_path", None))
 
-    # Parse trailing toggle ONLY for template_term; diagram always includes tc2 by default.
+    # Parse trailing toggle ONLY for template_term; diagram/tree always include tc2/trt by default if present.
     include_tc_term = False
     if rest:
         ws_parts = rest.split()
@@ -313,7 +347,7 @@ def terms(line: str = ""):
         terms_list = [t.strip() for t in rest_wo_toggle.split(",") if t.strip()]
         count = 1 if not terms_list else 0
 
-    # Section-only mode: ignore tc logic
+    # Section-only mode: ignore tc logic entirely
     if section_hint:
         template_str = _select_template_section(data, section_hint)
         active_template = "section"
@@ -345,9 +379,22 @@ def terms(line: str = ""):
                 raise ValueError("template_diagram is empty or missing sections")
             template_str = "\n".join(parts_td)
 
+        elif active_template == "template_tree" and isinstance(data.get("template_tree"), dict):
+            # ALWAYS include trt (before footer) if present
+            order = ["trh", "trd", "trp", "tra", "tree", "trf"]
+            if "trt" in data["template_tree"]:
+                insert_idx = order.index("trf") if "trf" in order else len(order)
+                order = order[:insert_idx] + ["trt"] + order[insert_idx:]
+            parts_ttree = [data["template_tree"].get(sect) for sect in order]
+            parts_ttree = [p for p in parts_ttree if isinstance(p, str)]
+            if not parts_ttree:
+                raise ValueError("template_tree is empty or missing sections")
+            template_str = "\n".join(parts_ttree)
+
         else:
             template_str = _select_template_block(data, key_hint)
 
+    # In _blank_mapping(), append these keys:
     def _blank_mapping() -> Dict[str, str]:
         return {
             "Term": "{{Term}}",
@@ -379,8 +426,12 @@ def terms(line: str = ""):
             "WorstCase": "{{WorstCase}}",
             "AverageName": "{{AverageName}}",
             "WorstName": "{{WorstName}}",
+            "AverageSlug": "{{AverageSlug}}",
+            "WorstSlug": "{{WorstSlug}}",
+            # NEW for template_tree side-by-side diagrams:
+            "TypeDistinguishingExample": "{{TypeDistinguishingExample}}",
+            "TypeContradistinguishingExample": "{{TypeContradistinguishingExample}}",
         }
-
     blocks: List[str] = []
     if terms_list:
         for term in terms_list:
@@ -398,79 +449,82 @@ def terms(line: str = ""):
     tc_msg = ""
     if active_template == "template_term" and include_tc_term:
         tc_msg = " with tc"
-    elif active_template == "template_diagram":
+    elif active_template == "template_diagram" and "tc2" in data.get("template_diagram", {}):
         tc_msg = " with tc2"
+    elif active_template == "template_tree" and "trt" in data.get("template_tree", {}):
+        tc_msg = " with trt"
     print(f"✅ Inserted {len(blocks)} template block(s){tc_msg}.")
 
-    @register_line_magic
-    def cp_jup_temp(line: str = ""):
-        """
-        Create a Jupyter subdirectory with templated notebooks.
-        Usage:
-          %cp_jup_temp 01.Intro
-        """
-        target = (line or "").strip()
-        if not target:
-            print("❌ Please provide a folder name. Example: %cp_jup_temp 01.Intro")
-            return
-        if cptemp is None:
-            print("❌ cptemp module not found. Ensure it is importable from this kernel.")
-            return
-        try:
-            cptemp(target)
-            print(f"✅ Created templated notebooks in: {target}")
-        except Exception as e:
-            print(f"⚠ Error creating notebooks: {e}")
+
+@register_line_magic
+def cp_jup_temp(line: str = ""):
+    """
+    Create a Jupyter subdirectory with templated notebooks.
+    Usage:
+      %cp_jup_temp 01.Intro
+    """
+    target = (line or "").strip()
+    if not target:
+        print("❌ Please provide a folder name. Example: %cp_jup_temp 01.Intro")
+        return
+    if cptemp is None:
+        print("❌ cptemp module not found. Ensure it is importable from this kernel.")
+        return
+    try:
+        cptemp(target)
+        print(f"✅ Created templated notebooks in: {target}")
+    except Exception as e:
+        print(f"⚠ Error creating notebooks: {e}")
 
 
-    @register_line_magic
-    def nb_search(line: str = ""):
-        """
-        Search all .ipynb files inside directories whose path contains any segment
-        starting with '_' (e.g., _MLGlossary/) for a case-insensitive keyword.
+@register_line_magic
+def nb_search(line: str = ""):
+    """
+    Search all .ipynb files inside directories whose path contains any segment
+    starting with '_' (e.g., _MLGlossary/) for a case-insensitive keyword.
 
-        Usage:
-          %nb_search keyword
-          %nb_search "predict_proba"
-          %nb_search keyword base_dir=~/Workspace/jupyter
-        """
-        line = (line or "").strip()
-        if not line:
-            print("❌ Usage: %nb_search <keyword> [base_dir=~/Workspace/jupyter]")
-            return
+    Usage:
+      %nb_search keyword
+      %nb_search "predict_proba"
+      %nb_search keyword base_dir=~/Workspace/jupyter
+    """
+    line = (line or "").strip()
+    if not line:
+        print("❌ Usage: %nb_search <keyword> [base_dir=~/Workspace/jupyter]")
+        return
 
-        base_dir = getattr(activate, "_default_base_dir", "~/Workspace/jupyter")
-        m = re.search(r'\bbase_dir\s*=\s*([^\s]+)', line)
-        if m:
-            base_dir = m.group(1)
+    base_dir = getattr(activate, "_default_base_dir", "~/Workspace/jupyter")
+    m = re.search(r'\bbase_dir\s*=\s*([^\s]+)', line)
+    if m:
+        base_dir = m.group(1)
 
-        keyword = line[: m.start()].strip() if m else line
-        if not keyword:
-            print("❌ Please provide a keyword to search.")
-            return
+    keyword = line[: m.start()].strip() if m else line
+    if not keyword:
+        print("❌ Please provide a keyword to search.")
+        return
 
-        results = _search_notebooks_ci(keyword, base_dir)
-        if not results:
-            print(f"❌ No matches found for '{keyword}' under {Path(base_dir).expanduser().resolve()}")
-            return
+    results = _search_notebooks_ci(keyword, base_dir)
+    if not results:
+        print(f"❌ No matches found for '{keyword}' under {Path(base_dir).expanduser().resolve()}")
+        return
 
-        def highlight_md(match):
-            return f"<span style='color:red;font-weight:bold;'>{match.group(0)}</span>"
+    def highlight_md(match):
+        return f"<span style='color:red;font-weight:bold;'>{match.group(0)}</span>"
 
-        output_lines = []
-        for nb, matches in results.items():
-            nb_dir = Path(nb).parent.name
-            nb_name = Path(nb).name
-            output_lines.append(f"### 📓 {nb_dir}/{nb_name}")
-            for cell_idx, line_idx, text in matches:
-                snippet = text.strip()
-                snippet = re.sub(re.escape(keyword), highlight_md, snippet, flags=re.IGNORECASE)
-                if len(snippet) > 160:
-                    snippet = snippet[:160] + "…"
-                output_lines.append(f"- **Cell {cell_idx}, Line {line_idx}:** {snippet}")
+    output_lines = []
+    for nb, matches in results.items():
+        nb_dir = Path(nb).parent.name
+        nb_name = Path(nb).name
+        output_lines.append(f"### 📓 {nb_dir}/{nb_name}")
+        for cell_idx, line_idx, text in matches:
+            snippet = text.strip()
+            snippet = re.sub(re.escape(keyword), highlight_md, snippet, flags=re.IGNORECASE)
+            if len(snippet) > 160:
+                snippet = snippet[:160] + "…"
+            output_lines.append(f"- **Cell {cell_idx}, Line {line_idx}:** {snippet}")
 
-        display(Markdown("\n".join(output_lines)))
-        print(f"\n✅ {sum(len(v) for v in results.values())} match(es) across {len(results)} notebook(s).")
+    display(Markdown("\n".join(output_lines)))
+    print(f"\n✅ {sum(len(v) for v in results.values())} match(es) across {len(results)} notebook(s).")
 
 
 # When imported in a Python session, call:

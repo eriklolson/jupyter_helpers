@@ -16,8 +16,8 @@ template_term:
 
   tc: |
     #### ⏱️ Time Complexity:
-    🟡 Average (typical): ${{AverageCase}}$ — [{{AverageName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{AverageName}})
-    🔴 Worst (guaranteed): ${{WorstCase}}$ — [{{WorstName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{WorstName}})
+    🟡 Average (typical): ${{AverageCase}}$ — [{{AverageName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{AverageSlug}})
+    🔴 Worst (guaranteed): ${{WorstCase}}$ — [{{WorstName}}](_DSAGlossary/_DSATimeComplexity.ipynb#{{WorstSlug}})
 
   fo: |
     * * *
@@ -108,7 +108,7 @@ template_diagram:
     ~~~~~~
 
   n2: |
-    #### Further Notes:
+    #### Notes:
     -  {{Note1}}
     -  {{Note2}}
 
@@ -126,3 +126,52 @@ template_diagram:
   fo2: |
     * * *
     * * *
+template_tree:
+  trh: |
+    # *{{Term}}* Binary Tree
+    {{Definition}}
+
+  trp: |
+    #### Properties:
+    -  {{Note1}}
+    -  {{Note2}}
+
+  trd: |
+    <div style="display: flex; gap: 40px;">
+      <div>
+
+    **❌ Not {{Term}} Binary Tree**
+    ~~~~~~mathmatica
+    {{TypeDistinguishingExample}}
+    ~~~~~~
+      </div>
+      <div>
+
+    **✅ {{Term}} Binary Tree**
+    ~~~~~~mathmatica
+    {{TypeContradistinguishingExample}}
+    ~~~~~~
+      </div>
+    </div>
+
+  trc: |
+    #### How to Construct:
+
+  trt: |
+    #### ⏱️ Time Complexity Notes:
+  
+  tra: |
+    #### Common Applications:
+    -  {{Note1}}
+    -  {{Note2}}
+
+  tree: |
+    #### Python Example:
+    >~~~~~~python
+    > {{CodeExample}}
+    >~~~~~~
+
+  trf: |
+    * * *
+    * * *
+
