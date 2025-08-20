@@ -1,0 +1,21 @@
+dirs:
+- 4.Loops
+- 6.Pandas
+- 8.SciPy
+- 9.Matplotlib
+- 10.ML
+- 12.DSA
+dir_to_slug:
+  10.ML: ML
+  12.DSA: DSA
+  4.Loops: Loops
+  6.Pandas: Pandas
+  8.SciPy: SciPy
+  9.Matplotlib: Matp
+slug_to_dir:
+  DSA: 12.DSA
+  ML: 10.ML
+  Loops: 4.Loops
+  Matp: 9.Matplotlib
+  Pandas: 6.Pandas
+  SciPy: 8.SciPy
