@@ -63,6 +63,9 @@ envs/
 
 # Ignore everything inside the trash folder
 trash/*
+tmp/*
+
+# Ignore these files:
 
 # Except the marker file so the folder stays tracked
 !trash/.gitkeep
